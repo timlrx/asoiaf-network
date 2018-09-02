@@ -1,0 +1,1 @@
+Data obtained from: https://github.com/mathbeveridge/asoiaf/tree/master/data
