@@ -3,6 +3,7 @@ library(tidygraph)
 library(igraph)
 library(ggplot2)
 library(ggraph)
+library(gganimate)
 
 set.seed(101)
 
@@ -152,7 +153,7 @@ df3 <- df2 %>%
 return(df3)
 }
 
-book2 <- process_graph(node_df, edge_df, book_num = 2, q=0.8)
+book2 <- process_graph(node_df, edge_df, book_num = 2, q=0.75)
 
 all_graphs <- lapply(1:5, function(x) process_graph(node_df, edge_df, book_num=x, q=0.8))
 
@@ -197,7 +198,9 @@ plot_graph <- function(graph) {
 
   graph %>%
     ggraph(layout = "manual", x = x, y = y, circular = T) +
-    geom_edge_arc(aes(alpha = weight)) +
+    # Need to use link0 for gganimate
+    #geom_edge_arc(aes(alpha = weight)) +
+    geom_edge_link0(aes(alpha = weight)) +
     geom_node_point(aes(color = community, size = pagerank)) +
     # data = filter(graph %>% as_tibble(), x>0),
     geom_node_text(aes(label = Label_short, x = x * 1.04, y = y* 1.04,
@@ -209,6 +212,64 @@ plot_graph <- function(graph) {
     expand_limits(x = c(xmin-0.2, xmax+0.2), y = c(ymin-0.2, ymax+0.2))
 }
 
-plot_graph(full_graph %>% select(-community, -pagerank))
-plot_graph(all_graphs[[1]])
+temp <- plot_graph(full_graph %>% select(-community, -pagerank)) +
+  scale_color_manual(values=colorRampPalette(c("blue", "yellow", "red"))(11)[c(1,11,2,10,6,9,4,8,5,7,3)],
+                     labels=c("King's Landing", "The Wall",
+                              "Arya and the Brotherhood", "Daenerys's Khalasar",
+                              "Bran's companions", "House Bolton",
+                              "House Martell", "Young Griff", "Dragonstone",
+                              "Brienne's party", "Gregor and Oberyn"))
+# "Riverlands" = "5",
+# "House Greyjoy" = "10",
+# "Harrenhal guards" = "12",
+# "Citadel" = "14"
 
+p <- plot_graph(
+  full_graph %>%
+    select(-community, -pagerank) %>%
+    activate(edges) %>%
+    mutate(scaled_weight = ((min(99, weight) - min(weight)) / (min(100, max(weight)) - min(weight))) * 60,
+           book_time = as.POSIXct((paste0('2018-10-10', book, ":", scaled_weight)), format = "%Y-%m-%d %H:%M")) %>%
+    #mutate(book_time = as.Date((paste0('2018-10-', book)))) %>%
+    activate(nodes)
+)
+
+p <- p +
+  ggtitle('ASOIAF Character Network', subtitle = 'Book {current_frame}') +
+  transition_manual(book)
+
+animate(p, 50, 10,width = 1200, height = 800)
+
+
+p <- plot_graph(
+  t<-full_graph %>%
+    select(-community, -pagerank) %>%
+    activate(edges) %>%
+    mutate(tweight = ifelse(weight >100, 100, weight)) %>%
+    group_by(book) %>%
+    mutate(scaled_weight = (tweight - min(tweight)) / (max(tweight) - min(tweight)) * 60,
+           book_start_time = as.POSIXct((paste0('2018-10-10', book, ":00")), format = "%Y-%m-%d %H:%M"),
+           book_end_time = as.POSIXct((paste0('2018-10-10', book, ":", scaled_weight)), format = "%Y-%m-%d %H:%M")) %>%
+    ungroup() %>%
+    mutate(book_end_time = if_else(is.na(book_end_time), as.POSIXct((paste0('2018-10-10', book+1, ":00")), format = "%Y-%m-%d %H:%M"), book_end_time)) %>%
+#    activate(nodes) %>%
+    as_tibble() %>%
+    group_by(book_start_time, book_end_time) %>%
+    count()
+)
+
+fade_edge <- function(x) {
+  x$edge_alpha = 0
+  x$edge_width = 0
+  x
+}
+
+p2 <- p +
+  ggtitle('ASOIAF Character Network', subtitle = 'Book {as.numeric(format(frame_time, "%H"))}') +
+  transition_events(start = book_start_time,
+                    end = book_end_time,
+                    enter_length = hms::hms(minutes = 60), exit_length = hms::hms(minutes = 60)) +
+  enter_manual(fade_edge) + 
+  exit_manual(fade_edge)
+
+animate(p2, 100, 10,width = 900, height = 600)
